@@ -101,10 +101,10 @@ diffuse_color = baseColor - baseColor * metallic;
 4. specular_ibl
 
 ```
-  specular_ibl = **IBLSpeuclar**(specular_color,SamplerCube5,normal_dir,view_dir,ndv,roughness);
+  specular_ibl = IBLSpeuclar(specular_color,SamplerCube5,normal_dir,view_dir,ndv,roughness);
   
   //Specular env
-  float3 **IBLSpeuclar**(float3 specularColor,sampler envSpecular,float3 normalDir,float3 viewDir,float NoV,float roughness)
+  float3 IBLSpeuclar(float3 specularColor,sampler envSpecular,float3 normalDir,float3 viewDir,float NoV,float roughness)
   {
       float3 F = EnvBRDFApprox(specularColor,roughness,NoV);
       
@@ -141,8 +141,26 @@ diffuse_color = baseColor - baseColor * metallic;
       return SpecularColor * AB.x + AB.y;
   }
   
+  //Mobile Gammar to linear space convert 
+  float3 GammarToLinear(float3 value){
+      return value * value;
+  }
+  //Mobile linear to gammar space convert
+  float3 LinearToGammar(float3 value){
+      return sqrt(value);
+  }
 ```
+5. emissive  
+由一张emissive贴图控制
 
+6. 计算
+```
+  float3 result = diffuse + specular * ndl + specular_ibl + emissive;
+```
+7. 如果是在线性空间计算，就转回来
+```
+  result = LinearToGammar(result);
+```
 Enjoy!
 
 [reference manual]: http://research.microsoft.com/en-us/um/people/daan/madoko/doc/reference.html  "Madoko refrence manual"
