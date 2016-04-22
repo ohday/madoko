@@ -1,0 +1,106 @@
+Title         : Pbr材质实现
+Author        : ohday
+Logo          : True
+
+[TITLE]
+
+#character_pbr.fx
+接下来开始分析该材质的主要实现流程
+
+1. 读取信息、计算准备
+```
+  //Textures
+  float3 base_map = GetBaseMap(SamplerDiffuse0,ps_general.RawTexCoord0.xy);
+  float3 mask_map = GetMaskMap(SamplerMask6,ps_general.RawTexCoord0.xy);
+  //Normal
+  float3 normal_dir = GetNormalDir(ps_general);
+  float3 normal_view = GetNormalViewDir(normal_dir);
+  //attributes
+  float roughness = GetRoughness(1.0 - mask_map.r);
+  float metallic = GetMetallic(mask_map.g);
+  
+  float3 diffuse_color = GetDiffuseColor(base_map, metallic);
+  float3 specular_color = GetSpecularColor(base_map, metallic);
+  //vectors
+  float3 light_dir = normalize(float3(-0.5,0.8,-0.5));
+  float3 view_dir = normalize(CameraPos.xyz - ps_general.PosWorld.xyz);
+  float3 half_dir = normalize(light_dir + view_dir);
+  //
+  float ndh = DotClamped(normal_dir, half_dir);
+  float ndv = DotClamped(normal_dir, view_dir);
+  float ndl = DotClamped(normal_dir, light_dir);
+  float vdh = DotClamped(view_dir, half_dir);
+```
+以上操作包括读取base贴图，mask贴图，计算得到世界空间和视空间法线
+根据mask得到粗糙度和金属度的参数,其中有一定的范围控制
+```
+  glossness = max(0.04, min(0.98, maskValue));
+  roughness = 1.0 - glossness;
+  metallic = max(0.001, min(0.999, maskValue));
+```
+接下来，得到漫反射基本色diffuse_color和高光基本色specular_color,需要注意的是，specular_color的在线性空间和gama空间的lerp起始是不一样的，不知道为啥
+```
+diffuse_color = baseColor - baseColor * metallic;
+#if NEOX_LINEAR_SPACE
+	specular_color = lerp(0.04,specularColor,metallic);
+#else
+	specular_color = lerp(0.2,specularColor,metallic);
+#endif
+```
+之后得到入射光向量、摄像机向量、half向量，再分别与法线点乘并saturate到0、1之间，得到ndh,ndv,ndl,vdh
+的值
+
+2. diffuse
+```
+  float3 diffuse = GetBRDFDiffuse(diffuse_color); // 这里是直接返回了diffuse_color
+```
+3. specular
+```
+  specular = GetBRDFSpecular(specular_color,roughness,ndh,ndv,ndl,vdh);
+  跟进去，会有
+  specular = Distribution(roughness,NoH) * GeometricVisibility(roughness, NoV, NoL,VoH) * Fresnel(specularColor,VoH);
+  //接下来
+  float Distribution( float Roughness, float NoH )
+  {
+      return D_GGX( Roughness, NoH );
+  }
+  float D_GGX(float Roughness,float NoH)
+  {
+      float alpha = Roughness * Roughness;
+      float tmp = alpha / max(1e-8,(NoH*NoH*(alpha*alpha-1.0)+1.0));
+      return tmp * tmp * M_INV_PI;
+  }
+  
+  float GeometricVisibility( float Roughness, float NoV, float NoL, float VoH )
+  {
+      return Vis_Schlick( Roughness, NoV, NoL );
+  }
+  
+  // Tuned to match behavior of Vis_Smith
+  // [Schlick 1994, "An Inexpensive BRDF Model for Physically-Based Rendering"]
+  float Vis_Schlick( float Roughness, float NoV, float NoL )
+  {
+	   float k = ( Roughness * Roughness ) * 0.5;
+	   float Vis_SchlickV = NoV * (1 - k) + k;
+	   float Vis_SchlickL = NoL * (1 - k) + k;
+	   return 0.25 / ( Vis_SchlickV * Vis_SchlickL );
+  }
+  
+  float3 Fresnel( float3 SpecularColor, float VoH )
+  {
+	   return F_Schlick( SpecularColor, VoH );
+  }
+  // [Schlick 1994, "An Inexpensive BRDF Model for Physically-Based Rendering"]
+  // [Lagarde 2012, "Spherical Gaussian approximation for Blinn-Phong, Phong and Fresnel"]
+  float3 F_Schlick( float3 SpecularColor, float VoH )
+  {
+	   float Fc = pow(1 - VoH,5);
+	   return SpecularColor + (1.0 - SpecularColor) * Fc;
+  }
+  
+  
+```
+
+Enjoy!
+
+[reference manual]: http://research.microsoft.com/en-us/um/people/daan/madoko/doc/reference.html  "Madoko refrence manual"
