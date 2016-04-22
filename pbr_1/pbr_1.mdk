@@ -97,7 +97,49 @@ diffuse_color = baseColor - baseColor * metallic;
 	   float Fc = pow(1 - VoH,5);
 	   return SpecularColor + (1.0 - SpecularColor) * Fc;
   }
+```
+4. specular_ibl
+
+```
+  specular_ibl = **IBLSpeuclar**(specular_color,SamplerCube5,normal_dir,view_dir,ndv,roughness);
   
+  //Specular env
+  float3 **IBLSpeuclar**(float3 specularColor,sampler envSpecular,float3 normalDir,float3 viewDir,float NoV,float roughness)
+  {
+      float3 F = EnvBRDFApprox(specularColor,roughness,NoV);
+      
+      float ref_level = 0.0;//(pow(roughness,0.6) ) * 6.0 - 1.0;
+  #if NEOX_ENV_MATCAP_ENABLE
+      ref_level = roughness  * 6.0 - 1.0;
+      float3 env_color = tex2Dlod(SamplerCube5,float4(normalDir.xy,0.0,ref_level)).rgb;
+      //env_color *= env_color;
+      //env_color *= 2.0;
+  #else
+      ref_level = (pow(roughness,0.6) ) * 6.0 - 1.0;
+      float3 refVec = normalize(reflect(-viewDir,normalDir));
+      float3 env_color = texCUBElod(envSpecular,float4(refVec,ref_level)).rgb;
+      //env_color *= env_color;
+      //env_color *= 1.0 + roughness;
+  #endif
+  #if NEOX_LINEAR_SPACE
+      env_color = GammarToLinear(env_color);
+  #endif
+      //return roughness * roughness;
+      return F * env_color;
+  }
+  
+  half3 EnvBRDFApprox( half3 SpecularColor, half Roughness, half NoV )
+  {
+      // [ Lazarov 2013, "Getting More Physical in Call of Duty: Black Ops II" ]
+      // Adaptation to fit our G term.
+      const half4 c0 = { -1, -0.0275, -0.572, 0.022 };
+      const half4 c1 = { 1, 0.0425, 1.04, -0.04 };
+      half4 r = Roughness * c0 + c1;
+      half a004 = min( r.x * r.x, exp2( -9.28 * NoV ) ) * r.x + r.y;
+      half2 AB = half2( -1.04, 1.04 ) * a004 + r.zw;
+    
+      return SpecularColor * AB.x + AB.y;
+  }
   
 ```
 
